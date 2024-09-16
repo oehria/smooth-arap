@@ -604,25 +604,15 @@ int main(int argc, char* argv[]) {
     // Load a mesh from file
     std::string filename;
     if (argc == 2) {
-        filename = "C:/Users/annik/source/repos/oehria-code/libigl/tutorial/109_ImGuizmo/data/"+std::string(argv[1]); // Mesh provided as command line argument
+        filename = "../data/"+std::string(argv[1]); // Mesh provided as command line argument
     }
     else {
-        filename = std::string("C:/Users/annik/source/repos/oehria-code/libigl/tutorial/109_ImGuizmo/data/square_21_spikes.off"); // Default mesh
+        filename = std::string("../data/spot.obj"); // Default mesh
     }
     igl::read_triangle_mesh(filename, V, F);
-    V.resize(5, 3);
-    V.row(0) << -1, -1, 0;
-    V.row(1) << 0, -1, 0;
-    V.row(2) << 1, -1, 0;
-    V.row(3) << 0, 1, 0;
-    V.row(4) << 1, 1, 0;
-    F.resize(3, 3);
-    F.row(0) << 0, 1, 3;
-    F.row(1) << 1, 2, 3;
-    F.row(2) << 4, 3, 2;
-    V_orig = V;
+    V_orig=V;
     viewer.data().set_mesh(V, F);
-
+    
     //precomputations on mesh
     igl::adjacency_list(F, adj_list);
     igl::cotmatrix_entries(V_orig, F, Cov);//for rotation 
@@ -894,7 +884,7 @@ v     Switch off handle selection
     {
         col.row(i) = mesh_color;
     }
-    viewer.data().set_colors(col);//paint color
+    viewer.data().set_colors(mesh_color);//paint color
     viewer.data().compute_normals();
     viewer.data().show_lines = false;
     viewer.data().point_size = 10;
