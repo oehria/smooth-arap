@@ -41,6 +41,8 @@ bool no_mass = false;
 int method = 1;//0 is spokes only
 //1 spokes and rims
 //2 triangle spokes and rims
+string save_name;
+
 
 
 std::vector<std::set<int>> areas;//each one contains itself and all others attached
@@ -734,6 +736,21 @@ int main(int argc, char* argv[]) {
             if (ImGui::Button("10 iterations", ImVec2(-1, 0)))
             {
                 viewer.callback_key_pressed(viewer, 'c', 0);
+            }
+            ImGui::InputText("File name", save_name);
+			if (ImGui::Button("save .obj", ImVec2(-1, 0)))
+			{
+				//save textured mesh
+				std::fstream s{ "../res/" + save_name + ".obj", s.binary | s.trunc | s.in | s.out };
+				for (int i = 0; i < V.rows(); i++) {
+					s << "v " << V(i, 0) << " " << V(i, 1) << " " << V(i, 2) << std::endl;
+				}
+				for (int i = 0; i < F.rows(); i++) {
+					s << "f " << F(i, 0) + 1 << "/" << F(i, 0) + 1 << " "
+						<< F(i, 1) + 1 << "/" << F(i, 1) + 1 << " "
+						<< F(i, 2) + 1 << "/" << F(i, 2) + 1 << " " << std::endl;
+				}
+				s.close();
             }
         }
     };
