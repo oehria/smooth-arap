@@ -17,6 +17,7 @@
 #include <igl/arap.h>
 #include <igl/per_vertex_normals.h>
 #include <igl/opengl/glfw/Viewer.h>
+#include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <cmath>
 #include <igl/Timer.h>
 //#include <array>
@@ -32,6 +33,11 @@ std::vector<int> B;
 std::vector<Eigen::VectorXd> constrPositions;
 Eigen::VectorXi cvi;//save how many triangles vertices are part of
 bool full_rot_fitting = false;
+string save_name;
+
+enum Initialization { HANDLE, POISSON, BILAPLACIAN};
+Initialization init = HANDLE;
+
 
 class ConstrainedLinearSolver {//solves linear system with some rows fixed (not unknown)
 public:
@@ -839,6 +845,7 @@ int main(int argc, const char* argv[]) {
         b(i) = B[i];
     }
 
+
     //initialize here
     if (init == 0) {
         V1 = V;//move handles only
@@ -891,6 +898,103 @@ int main(int argc, const char* argv[]) {
         col.row(f) = mesh_color;
     }
     igl::opengl::glfw::Viewer viewer;
+    //add menu
+    igl::opengl::glfw::imgui::ImGuiPlugin imgui_plugin;
+    viewer.plugins.push_back(&imgui_plugin);
+    igl::opengl::glfw::imgui::ImGuiMenu menu;
+    imgui_plugin.widgets.push_back(&menu);
+
+    menu.callback_draw_viewer_menu = [&]()
+	{
+        if (ImGui::InputFloat("Smoothness Lambda [0,1]", &lambda, 0, 0));
+        ImGui::InputText("File name", save_name);
+        if (ImGui::Button("save .obj and stats", ImVec2(-1, 0)))
+        {
+            //save textured mesh
+            std::fstream s{ "../res/" + save_name + ".obj", s.binary | s.trunc | s.in | s.out };
+            for (int i = 0; i < V.rows(); i++) {
+                s << "v " << V1(i, 0) << " " << V1(i, 1) << " " << V1(i, 2) << std::endl;
+            }
+            for (int i = 0; i < F.rows(); i++) {
+                s << "f " << F(i, 0) + 1 << "/" << F(i, 0) + 1 << " "
+                    << F(i, 1) + 1 << "/" << F(i, 1) + 1 << " "
+                    << F(i, 2) + 1 << "/" << F(i, 2) + 1 << " " << std::endl;
+            }
+            s.close();
+            //save metrics in .txt
+            std::ofstream outFile("../res/" + save_name + ".txt");
+            // Check if the file opened successfully
+            if (!outFile) {
+                std::cerr << "Failed to open the file for writing!" << std::endl;
+            }
+            // Write some text to the file
+            outFile << "metrics for " << save_name << std::endl;
+
+            // Close the file
+            outFile.close();
+            std::cout << "Mesh and metrics have been saved!" << std::endl;
+
+        }
+        int init_type = static_cast<int>(init);
+        if (ImGui::Combo("Initialization Scheme", &init_type, "Handle\0Poisson\0Bi-Laplacian\0"))
+        {
+            init = static_cast<Initialization>(init_type);
+            if (init == HANDLE) {
+                V1 = V;//move handles only
+            }
+            if (init == POISSON) {
+                poi_init(edgeSets_sr);//solve poisson (L) equation
+            }
+            if (init == BILAPLACIAN) {
+                bilap_init(edgeSets_sr);//solve bi-laplacian (L^2) equation -> naive laplacian editing
+            }
+            viewer.data().set_mesh(V1, F);//paint mesh. U is V, F faces
+
+        }
+        
+        if (ImGui::Button("deform", ImVec2(-1, 0))){
+            //initialize here
+            if (init == 0) {
+                V1 = V;//move handles only
+            }
+            if (init == 1) {
+                poi_init(edgeSets_sr);//solve poisson (L) equation
+            }
+            if (init == 2) {
+                bilap_init(edgeSets_sr);//solve bi-laplacian (L^2) equation -> naive laplacian editing
+            }
+
+            //build system
+            A = lambda * L * L + (1.0 - lambda) * L;
+            ConstrainedLinearSolver solver(A, B, constrPositions);//build constrained solver for system matrix
+            std::vector<Eigen::Matrix3d> rot(F.rows(), Eigen::Matrix3d::Identity());//for triangle
+            if (!triangle){
+                rot.resize(V.rows());
+            }
+            MatrixXd V_old=V;
+            igl::Timer time;
+            time.start();
+            int iterations_ago = 100;
+            for (int i = 0; i < iterations; ++i) {//iterative optimization process 
+                if (triangle) {
+                    findRotations_triangles(V, V1, F, C, edgeSets_tr, L, L * V, lambda, rot);
+                    rhs_triangles(C, V, F, L * V, edgeSets_tr, L, rot, lambda, rhs);
+                }
+                else {
+                    findRotations_sr(V, V1, edgeSets_sr, rot, lambda);
+                    assembleRHS_sr(V, LV0, edgeSets_sr, L, rot, lambda, rhs);
+                }
+                
+                solver.solve(rhs, V1);
+                if (i % iterations_ago == 0) {
+                    cout << (V1 - V_old).norm() << endl;
+                    V_old = V1;
+                }
+                viewer.data().set_mesh(V1, F);//paint mesh. U is V, F faces
+            }
+        }
+    };
+
     MatrixXi doubleFaces(F.rows() * 2, F.cols());
     int maxV = V.rows();
     MatrixXi backFaces = F;// +MatrixXi::Constant(F.rows(), F.cols(), maxV);
