@@ -632,6 +632,11 @@ int main(int argc, char* argv[]) {
     //handle plugins for deformation, selection, menu
     igl::opengl::glfw::imgui::ImGuiPlugin imgui_plugin;
     viewer.plugins.push_back(&imgui_plugin);
+    
+    //add menu
+    igl::opengl::glfw::imgui::ImGuiMenu menu;
+    imgui_plugin.widgets.push_back(&menu);
+    
     // Add a 3D gizmo plugin
     guizmo.operation = ImGuizmo::TRANSLATE;
     imgui_plugin.widgets.push_back(&guizmo);
@@ -639,10 +644,10 @@ int main(int argc, char* argv[]) {
     guizmo.T.block(0, 3, 3, 1) = V.row(plugin_vertex).transpose().cast<float>();
     //Add selection plugin
     selection.mode = igl::opengl::glfw::imgui::SelectionWidget::OFF;
+    //ImGui::NewFrame();
     imgui_plugin.widgets.push_back(&selection);
-    //add menu
-    igl::opengl::glfw::imgui::ImGuiMenu menu;
-    imgui_plugin.widgets.push_back(&menu);
+
+
 
     // Attach callback to apply imguizmo's transform to mesh
     guizmo.callback = [&](const Eigen::Matrix4f& T)
