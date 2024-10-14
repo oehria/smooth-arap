@@ -239,6 +239,38 @@ struct Edge_sr {
     const double w;//the cotan (face) weight of this edge with this rid
 };
 
+//initializes spokes and rims datastructure used for later computations
+//arguments: V holds original vertex positions, F faces, C cotan Laplace matrix and edgeSets_sr will hold resulting datastructure
+void spokesAndRimsEdges_sr(Eigen::MatrixXd& V, 
+    Eigen::MatrixXi& F, 
+    Eigen::MatrixXd C,
+    std::vector<std::vector<Edge_sr>>& edgeSets_sr) {
+
+    const int nv = (int)V.rows();//number of vertices
+    const int nf = (int)F.rows();//number of faces
+    edgeSets_sr.resize(nv);//one entry per vertex because per-vertex rotations will be computed from this
+
+    for (int i = 0; i < nf; i++) {//go over triangles
+        for (int e = 0; e < 3; e++) {
+            int j1 = (e+1)%3;//edge vertices indices
+            int j2 = (e+2)%3;
+            int vi = F(i, j1);//corresponding vertices
+            int vj = F(i, j2);
+            int vk = F(i, e);//opposite vertex (gives angle, identifies edge weight C(i,e))
+
+            //push this edge with all 3 possible rotations and their corresponding weight into datastructure
+            edgeSets_sr[vi].push_back({ vi, vj, vi, C(i,e)/3.0});//spoke rotation
+            edgeSets_sr[vi].push_back({ vi, vj, vj, C(i,e)/3.0});//spoke rotation
+            edgeSets_sr[vi].push_back({ vi, vj, vk, C(i,e)/3.0});//rim rotation
+            //same for other vertex direction
+            edgeSets_sr[vj].push_back({ vj, vi, vi, C(i,e)/3.0 });//spoke rotation
+            edgeSets_sr[vj].push_back({ vj, vi, vj, C(i,e)/3.0 });//spoke rotation
+            edgeSets_sr[vj].push_back({ vj, vi, vk, C(i,e)/3.0 });//rim rotation
+        }
+    }
+}
+
+
 //spokes and rims per vertex rotation fitting
 //arguments: matrix V0 holding original vertex positions, V1 current vertex positions
 //edgeSets_sr holds information about mesh structure, has to be initialized via spokesAndRimsEdges_sr
@@ -257,7 +289,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
             const Eigen::Vector3d e0 = V0.row(e.vertex_pos) - V0.row(e.vertex_neg);
             const Eigen::Vector3d e1 = V1.row(e.vertex_pos) - V1.row(e.vertex_neg);
             if (full_rot) {
-                rot[e.rid] += (1.0 - lambda) * e.w/3.0* e0 * e1.transpose();
+                rot[e.rid] += (1.0 - lambda)* e.w * e0 * e1.transpose();
             }
             else {
                 rot[e.rid] += e.w * e0 * e1.transpose();
@@ -269,7 +301,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
     if (full_rot && lambda) {
         const Eigen::MatrixXd LV1 = L * V1;
         for (int i = 0; i < n; ++i) {
-            rot[i] += lambda * 1/area(i)*LV0.row(i).transpose() * LV1.row(i);
+            rot[i] += lambda *LV0.row(i).transpose() * LV1.row(i);
         }
     }
 
@@ -281,7 +313,9 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
         rot[i] = svd.matrixV() * svd.matrixU().transpose();
         if (rot[i].determinant() < 0) {
             rot[i] = svd.matrixV() * flip * svd.matrixU().transpose();
+            //rot[i]=rot[i].transpose().eval();
         }
+        //rot[i].setIdentity();
     }
 }
 
@@ -309,9 +343,9 @@ void assembleRHS_sr(const Eigen::MatrixXd& V0,
             b.setZero();
             for (auto& e : edgeSet) {//go over triangles/edges around vertex
                 const Eigen::Vector3d e0 = V0.row(e.vertex_pos) - V0.row(e.vertex_neg);
-                b += e.w / 3.0 * R[e.rid] * e0;//compute weighted, rotated edge
+                b += e.w * R[e.rid] * e0;//compute weighted, rotated edge
             }
-            rhs.row(row) = (1.0 - lambda)  *2* b;
+            rhs.row(row) = (1.0 - lambda) *2*b;
             row++;
         }
     }
@@ -322,7 +356,7 @@ void assembleRHS_sr(const Eigen::MatrixXd& V0,
         for (int i = 0; i < b2.rows(); ++i) {
             b2.row(i) = R[i] * LV0.row(i).transpose();//smooth arap has rotated lap vector
         }
-        rhs += lambda *L * M_inv*b2;
+        rhs += lambda *L *b2;
     }
 }
 
@@ -429,43 +463,9 @@ void assembleRHS2(const Eigen::MatrixXd& C,
     }
 }
 
-
-
 //scalar multiplication of sparse matrix
 void mulSparse(Eigen::SparseMatrix<double>& L, const double f) {
     for (int i = 0; i < L.nonZeros(); ++i) L.valuePtr()[i] *= f;
-}
-
-
-//initializes spokes and rims datastructure used for later computations
-//arguments: V holds original vertex positions, F faces, C cotan Laplace matrix and edgeSets_sr will hold resulting datastructure
-void spokesAndRimsEdges_sr(Eigen::MatrixXd& V, 
-    Eigen::MatrixXi& F, 
-    Eigen::MatrixXd C,
-    std::vector<std::vector<Edge_sr>>& edgeSets_sr) {
-
-    const int nv = (int)V.rows();//number of vertices
-    const int nf = (int)F.rows();//number of faces
-    edgeSets_sr.resize(nv);//one entry per vertex because per-vertex rotations will be computed from this
-
-    for (int i = 0; i < nf; i++) {//go over triangles
-        for (int e = 0; e < 3; e++) {
-            int j1 = (e+1)%3;//edge vertices indices
-            int j2 = (e+2)%3;
-            int vi = F(i, j1);//corresponding vertices
-            int vj = F(i, j2);
-            int vk = F(i, e);//opposite vertex (gives angle, identifies edge weight C(i,e))
-
-            //push this edge with all 3 possible rotations and their corresponding weight into datastructure
-            edgeSets_sr[vi].push_back({ vi, vj, vi, C(i,e)});//spoke rotation
-            edgeSets_sr[vi].push_back({ vi, vj, vj, C(i,e)});//spoke rotation
-            edgeSets_sr[vi].push_back({ vi, vj, vk, C(i,e)});//rim rotation
-            //same for opposite direction
-            edgeSets_sr[vj].push_back({ vj, vi, vi, C(i,e) });//spoke rotation
-            edgeSets_sr[vj].push_back({ vj, vi, vj, C(i,e) });//spoke rotation
-            edgeSets_sr[vj].push_back({ vj, vi, vk, C(i,e) });//rim rotation
-        }
-    }
 }
 
 void findRotations_spokes(const Eigen::MatrixXd& V0,
@@ -826,7 +826,7 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
             for (auto& e : edgeSet) {//go over triangles/edges around vertex
                 const Eigen::Vector3d e0 = V_orig.row(e.vertex_pos) - V_orig.row(e.vertex_neg);
                 const Eigen::Vector3d e1 = V_def.row(e.vertex_pos) - V_def.row(e.vertex_neg);
-                energy += e.w/3.0 * (R[e.rid] * e0-e1).squaredNorm();//compute weighted, rotated edge
+                energy += (1-lambda)*e.w * (R[e.rid] * e0 - e1).squaredNorm();//compute weighted, rotated edge
             }
         }
     }
@@ -834,11 +834,11 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     MatrixXd lap_def=(L*V_def).transpose();
     if(lambda){
         for(int i=0; i<V_orig.rows(); i++){
-            energy += 1/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+            energy += lambda*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
         }
     }
-    if(energy>prev_energy){
-        cout<<"energy increase din global "<<energy-prev_energy<<endl;
+    if(energy>prev_energy+0.000000001){
+        cout<<"energy increase din global (fixed rotations) "<<energy-prev_energy<<" "<<energy<<endl;
     }
     prev_energy=energy;
     //compute energy after next local step
@@ -849,7 +849,7 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
             for (auto& e : edgeSet) {//go over triangles/edges around vertex
                 const Eigen::Vector3d e0 = V_orig.row(e.vertex_pos) - V_orig.row(e.vertex_neg);
                 const Eigen::Vector3d e1 = V_def.row(e.vertex_pos) - V_def.row(e.vertex_neg);
-                energy += e.w/3.0 * (R[e.rid] * e0-e1).squaredNorm();//compute weighted, rotated edge
+                energy += (1-lambda)*e.w * (R[e.rid] * e0 - e1).squaredNorm();//compute weighted, rotated edge
             }
         }
     }
@@ -857,11 +857,11 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     lap_def=(L*V_def).transpose();
     if(lambda){
         for(int i=0; i<V_orig.rows(); i++){
-            energy += 1/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+            energy += lambda*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
         }
     }
-    if(energy>prev_energy){
-        cout<<"energy increase din local "<<energy-prev_energy<<endl;
+    if(energy>prev_energy+0.000000001){
+        cout<<"energy increase din local (new fitted rot) "<<energy-prev_energy<<endl;
     }
     prev_energy=energy;
     return energy;
@@ -1034,7 +1034,7 @@ int main(int argc, const char* argv[]) {
             igl::Timer time;
             time.start();
             //build system //TODO add mass
-            A = lambda * L * M_inv * L + (1.0 - lambda) * 2 * L;
+            A = lambda * L * L + (1.0 - lambda) * 2*L;
             ConstrainedLinearSolver solver(A, B, constrPositions);//build constrained solver for system matrix
             if (!triangle){
                 rot.resize(V.rows());
@@ -1061,9 +1061,6 @@ int main(int argc, const char* argv[]) {
 				}
                 //cout<<energy_sr(V,V1,rot,edgeSets_sr)<<endl;
                 double curr_energy=energy_sr(V,V1,rot,edgeSets_sr);
-                if(curr_energy>prev_energy){
-                    cout<<"energy increased"<<endl;
-                }
                 metric_energy.push_back(curr_energy);
 				V_old = V1;//update
                 
