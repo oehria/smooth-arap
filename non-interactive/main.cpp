@@ -301,7 +301,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
     if (full_rot && lambda) {
         const Eigen::MatrixXd LV1 = L * V1;
         for (int i = 0; i < n; ++i) {
-            rot[i] += lambda *LV0.row(i).transpose() * LV1.row(i);
+            rot[i] += lambda/area(i) *LV0.row(i).transpose() * LV1.row(i);
         }
     }
 
@@ -356,7 +356,7 @@ void assembleRHS_sr(const Eigen::MatrixXd& V0,
         for (int i = 0; i < b2.rows(); ++i) {
             b2.row(i) = R[i] * LV0.row(i).transpose();//smooth arap has rotated lap vector
         }
-        rhs += lambda *L *b2;
+        rhs += lambda *L *M_inv*b2;
     }
 }
 
@@ -834,7 +834,7 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     MatrixXd lap_def=(L*V_def).transpose();
     if(lambda){
         for(int i=0; i<V_orig.rows(); i++){
-            energy += lambda*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+            energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
         }
     }
     if(energy>prev_energy+0.000000001){
@@ -857,7 +857,7 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     lap_def=(L*V_def).transpose();
     if(lambda){
         for(int i=0; i<V_orig.rows(); i++){
-            energy += lambda*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+            energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
         }
     }
     if(energy>prev_energy+0.000000001){
@@ -891,8 +891,11 @@ int main(int argc, const char* argv[]) {
     LV1 = LV0;
     igl::massmatrix(V, F, igl::MASSMATRIX_TYPE_VORONOI, M);//write into mass matrix
     area=M.diagonal().eval();
+    //idea: normalize s.t. each area entry is approx 1 (divide by sum, all sum to 1, times V which is number of areas)
     M/=area.sum();
+    M*=V.rows();
     area/=area.sum();//normalize to area 1 so smoothness lambda not dependent on size of mesh
+    area*=V.rows();
     igl::invert_diag(M, M_inv);//invert it
     //load constraints from experiment, this is just needed to display them later
     Eigen::MatrixXd bc(constrPositions.size(), 3);
@@ -1034,7 +1037,7 @@ int main(int argc, const char* argv[]) {
             igl::Timer time;
             time.start();
             //build system //TODO add mass
-            A = lambda * L * L + (1.0 - lambda) * 2*L;
+            A = lambda * L * M_inv* L + (1.0 - lambda) * 2*L;
             ConstrainedLinearSolver solver(A, B, constrPositions);//build constrained solver for system matrix
             if (!triangle){
                 rot.resize(V.rows());
