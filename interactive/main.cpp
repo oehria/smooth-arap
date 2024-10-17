@@ -30,7 +30,7 @@ using Viewer = igl::opengl::glfw::Viewer;
 
 Eigen::MatrixXd V_orig, V_def, V;//vertex matrices
 Eigen::MatrixXi F;//face matrix
-Eigen::SparseMatrix<double> L, M, M_inv;//laplacian matrix, mass matrix
+Eigen::SparseMatrix<double> L, L_sr, M, M_inv;//laplacian matrix, mass matrix
 Eigen::MatrixXd Cov;//for rotation fitting
 igl::opengl::glfw::Viewer viewer;
 bool vertex_picking_mode = false;
@@ -294,6 +294,7 @@ Eigen::MatrixXd rhs_sr(const Eigen::MatrixXd& C,
         rhs.row(row) = (1.0 - lambda) * b;
         row++;
     }
+    //MatrixXd LV0_sr=L_sr*V_orig;
     if (lambda) {//lambda
         Eigen::MatrixXd b2;
         b2.resizeLike(LV0);
@@ -361,7 +362,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
         const Eigen::MatrixXd LV1 = L * V1;
 
         for (int i = 0; i < n; ++i) {
-            rot[i] += 2*lambda *M_inv.coeff(i, i) * LV0.row(i).transpose() * LV1.row(i);
+            rot[i] += 2*lambda * LV0.row(i).transpose() * LV1.row(i);//note removed minv here, think
         }
     }
 
@@ -397,6 +398,24 @@ void factorize(Viewer& viewer, double lambda) {
     if (no_mass) {
         M_inv.setIdentity();//NO MASS USED
     }
+
+    //ANNIKA -- try spokes and rims smooth term 
+    std::vector<Eigen::Triplet<double>> triplets_sr;
+	// Fill triplets
+    int v = 0;
+    for (auto& edgeSet : edgeSets) {//go over vertices
+        for (auto& e : edgeSet) {//go over triangles/edges around vertex
+            triplets_sr.push_back(Eigen::Triplet<double>(v, e.i, e.w));
+            triplets_sr.push_back(Eigen::Triplet<double>(v, e.j, -e.w));
+            //duplicates are not an issue, will be added up by setFromTriplets
+        }
+        v++;
+    }
+	// Construct laplacian matrix from triplets
+	L_sr.resize(V.rows(), V.rows());
+	L_sr.setFromTriplets(triplets_sr.begin(), triplets_sr.end());
+
+
     //construct system matrix 
     bi_lap = lambda * L * M_inv * L - (1.0 - lambda) * L;
     //constrain system
@@ -409,6 +428,10 @@ void factorize(Viewer& viewer, double lambda) {
             v_free_index[count_free++] = i;
         }
     }
+    for(int i=0; i<handle_vertices.size(); i++){
+        std::cout<<handle_vertices[i]<<", ";
+    }
+    std::cout<<std::endl;
     igl::slice(bi_lap, v_free_index, v_free_index, solver_mat);
     igl::slice(bi_lap, v_free_index, v_constrained_index, free_influenced);
     solver.compute(solver_mat);
@@ -636,7 +659,6 @@ int main(int argc, char* argv[]) {
     //add menu
     igl::opengl::glfw::imgui::ImGuiMenu menu;
     imgui_plugin.widgets.push_back(&menu);
-    
     // Add a 3D gizmo plugin
     guizmo.operation = ImGuizmo::TRANSLATE;
     imgui_plugin.widgets.push_back(&guizmo);
@@ -644,7 +666,6 @@ int main(int argc, char* argv[]) {
     guizmo.T.block(0, 3, 3, 1) = V.row(plugin_vertex).transpose().cast<float>();
     //Add selection plugin
     selection.mode = igl::opengl::glfw::imgui::SelectionWidget::OFF;
-    //ImGui::NewFrame();
     imgui_plugin.widgets.push_back(&selection);
 
 
