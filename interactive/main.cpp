@@ -22,6 +22,8 @@
 #include <igl/arap.h>
 #include <igl/screen_space_selection.h>
 #include <igl/AABB.h>
+#include <igl/stb/read_image.h>
+
 
 //names
 using namespace std;
@@ -922,12 +924,20 @@ v     Switch off handle selection
 )";
 
     //set up viewer
-    Eigen::MatrixXd col(V.rows(), 3);
-    for (int i = 0; i < V.rows(); i++)//go over vertices
-    {
-        col.row(i) = mesh_color;
+    if(filename.compare("spot.obj")){
+        mesh_color.setOnes();
     }
     viewer.data().set_colors(mesh_color);//paint color
+    if(filename.compare("spot.obj")){
+        Eigen::Matrix<unsigned char,Eigen::Dynamic,Eigen::Dynamic> R,G,B,A;
+        igl::stb::read_image("../data/spot_texture.png",R,G,B,A);
+        MatrixXd VT, CN, FN;
+        MatrixXi FT;
+        igl::readOBJ(filename, V, VT, CN, F, FT, FN);
+        viewer.data().set_uv(VT, FT);
+        viewer.data().show_texture = true;
+        viewer.data().set_texture(R,G,B);
+    }
     viewer.data().compute_normals();
     viewer.data().show_lines = false;
     viewer.data().point_size = 10;
