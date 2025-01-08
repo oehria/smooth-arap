@@ -21,7 +21,6 @@
 #include <cmath>
 #include <igl/Timer.h>
 #include<igl/massmatrix.h>
-//#include <array>
 
 using namespace Eigen;
 using namespace std;
@@ -33,7 +32,7 @@ VectorXd area;
 std::vector<std::vector<int>> adj;
 std::vector<int> B;
 std::vector<Eigen::VectorXd> constrPositions;
-Eigen::VectorXi cvi;//save how many triangles vertices are part of
+//Eigen::VectorXi cvi;//save how many triangles vertices are part of
 string save_name;
 
 enum Initialization { HANDLE, POISSON, BILAPLACIAN};
@@ -41,11 +40,11 @@ Initialization init = HANDLE;
 
 int max_iters=2000;
 float lambda;
-const double convergence_thresh=0.00001;
+const double convergence_thresh=0.0001;
 int metric_iters;
-double metric_time;
+double metric_time, metric_fac_time;
 vector<double> metric_energy;
-double prev_energy=1000;
+double prev_energy=2000;
 
 
 class ConstrainedLinearSolver {//solves linear system with some rows fixed (not unknown)
@@ -167,12 +166,9 @@ void trianglesEdges(Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::SparseMatrix<
     Eigen::MatrixXd C;
     igl::cotmatrix_entries(V, F, C);
 
-    cvi = Eigen::VectorXi::Zero(nv);
 
     for (int i = 0; i < nf; ++i) {//go over triangles
-        cvi(F(i, 0)) += 1;//count how many triangles this vertex is part of
-        cvi(F(i, 1)) += 1;
-        cvi(F(i, 2)) += 1;
+
         for (int j = 0; j < 3; ++j) {//for each vertex being in triangle
 
             int j0 = j;//vertex we focus on
@@ -200,7 +196,7 @@ Eigen::MatrixXd rhs_triangles(const Eigen::MatrixXd& C,
     rhs.resize(nv, 3);
     rhs.setZero();
 
-    Eigen::Vector3d b;
+    /*Eigen::Vector3d b;
 
     for (int i = 0; i < nv; ++i) {//go over vertices
         b.setZero();
@@ -227,7 +223,7 @@ Eigen::MatrixXd rhs_triangles(const Eigen::MatrixXd& C,
         }
 
         rhs += lambda * L * b2;
-    }
+    }*/
     return rhs;
 }
 
@@ -345,7 +341,7 @@ void assembleRHS_sr(const Eigen::MatrixXd& V0,
                 const Eigen::Vector3d e0 = V0.row(e.vertex_pos) - V0.row(e.vertex_neg);
                 b += e.w * R[e.rid] * e0;//compute weighted, rotated edge
             }
-            rhs.row(row) = (1.0 - lambda) *2*b;
+            rhs.row(row) = (1.0 - lambda) *b;
             row++;
         }
     }
@@ -790,6 +786,10 @@ void experiment(string mesh) {
                 constrPositions.push_back(def_r*V.row(i).transpose()+def_t);
             }
         }
+        for(int i=0; i<B.size(); i++){
+            std::cout<<B[i]<<",";
+        }
+        std::cout<<std::endl<<std::endl;
     }
     //write handles (B) into text file
     // Create and open a text file
@@ -832,17 +832,17 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     }
     MatrixXd lap_orig=(L*V_orig).transpose();
     MatrixXd lap_def=(L*V_def).transpose();
-    if(lambda){
-        for(int i=0; i<V_orig.rows(); i++){
-            energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
-        }
-    }
-    if(energy>prev_energy+0.000000001){
-        cout<<"energy increase din global (fixed rotations) "<<energy-prev_energy<<" "<<energy<<endl;
-    }
+    // if(lambda){
+    //     for(int i=0; i<V_orig.rows(); i++){
+    //         energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+    //     }
+    // }
+    // if(energy>prev_energy+0.000000001){
+    //     cout<<"energy increase din global (fixed rotations) "<<energy-prev_energy<<" "<<energy<<endl;
+    // }
     prev_energy=energy;
     //compute energy after next local step
-    findRotations_sr(V_orig, V_def, eSets, R, lambda, true);
+    findRotations_sr(V_orig, V_def, eSets, R, lambda, false);//ANNIKA NOTE ATTENTION TODO is arap energy now
     energy=0;
     if(1-lambda){//original spokes and rims arap term
         for (auto& edgeSet : eSets) {//go over vertices
@@ -855,14 +855,14 @@ double energy_sr(const MatrixXd& V_orig, const MatrixXd& V_def, std::vector<Eige
     }
     lap_orig=(L*V_orig).transpose();
     lap_def=(L*V_def).transpose();
-    if(lambda){
-        for(int i=0; i<V_orig.rows(); i++){
-            energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
-        }
-    }
-    if(energy>prev_energy+0.000000001){
-        cout<<"energy increase din local (new fitted rot) "<<energy-prev_energy<<endl;
-    }
+    // if(lambda){
+    //     for(int i=0; i<V_orig.rows(); i++){
+    //         energy += lambda/area(i)*(R[i] * lap_orig.col(i)-lap_def.col(i)).squaredNorm();//compute weighted, rotated edge
+    //     }
+    // }
+    // if(energy>prev_energy+0.000000001){
+    //     cout<<"energy increase din local (new fitted rot) "<<energy-prev_energy<<endl;
+    // }
     prev_energy=energy;
     return energy;
 }
@@ -990,12 +990,43 @@ int main(int argc, const char* argv[]) {
             // Write some text to the file
             outFile << "metrics for " << save_name << std::endl;
             outFile << metric_iters<<" iterations until convergence ("<<convergence_thresh<<")"<<endl;
-            outFile<<"took "<<metric_time<<"s"<<endl;
+            outFile<<"took "<<metric_time-metric_fac_time<<"s, excluding"<<metric_fac_time<<" for factorization"<<endl;
             outFile << "spokes and rims energies (with given lambda "<<lambda<<" and initialization "<<init<<")are:" << endl;
             for (int i = 0; i < metric_energy.size(); i++) {
                 outFile << metric_energy[i]<<", ";
             }
             std::cout<<std::endl;
+            outFile<<std::endl<<"per-neighbourhood (vertex) non-rigidity (origianal arap) energies"<<std::endl;
+
+            double energy=0;
+            int i=0;
+            std::vector<Eigen::Matrix3d> rot(V.rows(), Eigen::Matrix3d::Identity());//for triangle
+            findRotations_sr(V, V1, edgeSets_sr, rot, lambda,false);
+            double min=100;
+            double max=-1;
+            double avg=0;
+            for (auto& edgeSet : edgeSets_sr) {//go over vertices
+                energy=0;
+                for (auto& e : edgeSet) {//go over triangles/edges around vertex
+                    const Eigen::Vector3d e0 = V.row(e.vertex_pos) - V.row(e.vertex_neg);
+                    const Eigen::Vector3d e1 = V1.row(e.vertex_pos) - V1.row(e.vertex_neg);
+                    energy += e.w * (rot[e.rid] * e0 - e1).squaredNorm();//compute weighted, rotated edge
+                }
+                i++;
+                outFile<<energy<<std::endl;
+                if(energy<min){
+                    min=energy;
+                }
+                if(energy>max){
+                    max=energy;
+                }
+                avg+=energy/V.rows();//weighted average/ basically original arap energy:)
+            }
+            outFile<<"min "<<min<<std::endl;
+            outFile<<"max "<<max<<std::endl;
+            outFile<<"avg "<<avg<<std::endl;
+
+
             // Close the file
             outFile.close();
             std::cout << "Mesh and metrics have been saved!" << std::endl;
@@ -1031,29 +1062,30 @@ int main(int argc, const char* argv[]) {
             if (init == 2) {
                 bilap_init(edgeSets_sr);//solve bi-laplacian (L^2) equation -> naive laplacian editing
             }
-            std::vector<Eigen::Matrix3d> rot(F.rows(), Eigen::Matrix3d::Identity());//for triangle
+            std::vector<Eigen::Matrix3d> rot(V.rows(), Eigen::Matrix3d::Identity());//for triangle
             metric_energy.clear();
             metric_energy.push_back(energy_sr(V,V1,rot,edgeSets_sr));//also save init time
             igl::Timer time;
             time.start();
             //build system //TODO add mass
-            A = lambda * L * M_inv* L + (1.0 - lambda) * 2*L;
+            A = lambda * L * M_inv* L + (1.0 - lambda) * L;
             ConstrainedLinearSolver solver(A, B, constrPositions);//build constrained solver for system matrix
-            if (!triangle){
-                rot.resize(V.rows());
+            if (triangle){
+                rot.resize(F.rows());
             }
             MatrixXd V_old=V;
             int iterations_ago = 100;
             bool converged=false;
+            metric_fac_time=time.getElapsedTime();//save factorization time
             //for (int i = 0; i < iterations; ++i) {//iterative optimization process 
             int i=0;//count iterations
-            while(i<max_iters){//!converged&&i<max_iters
+            while(!converged&&i<max_iters){
                 if (triangle) {
                     findRotations_triangles(V, V1, F, C, edgeSets_tr, L, L * V, lambda, rot);
                     rhs_triangles(C, V, F, L * V, edgeSets_tr, L, rot, lambda, rhs);
                 }
                 else {
-                    findRotations_sr(V, V1, edgeSets_sr, rot, lambda,true);
+                    findRotations_sr(V, V1, edgeSets_sr, rot, lambda,false);
                     assembleRHS_sr(V, LV0, edgeSets_sr, L, rot, lambda, rhs);
                 }
                 
@@ -1063,8 +1095,8 @@ int main(int argc, const char* argv[]) {
 					converged = true;
 				}
                 //cout<<energy_sr(V,V1,rot,edgeSets_sr)<<endl;
-                double curr_energy=energy_sr(V,V1,rot,edgeSets_sr);
-                metric_energy.push_back(curr_energy);
+                //double curr_energy=energy_sr(V,V1,rot,edgeSets_sr);
+                //metric_energy.push_back(curr_energy);
 				V_old = V1;//update
                 
                 // if (i % iterations_ago == 0) {
