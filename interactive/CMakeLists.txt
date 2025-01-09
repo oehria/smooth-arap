@@ -12,7 +12,7 @@ igl_include(glfw)
 #igl_include(embree)
 igl_include(imgui)
 #igl_include(opengl)
-#igl_include(stb)
+igl_include(stb)
 #igl_include(predicates)
 #igl_include(xml)
 #igl_include(copyleft cgal)
@@ -35,7 +35,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   ## Other modules you could link to
   # igl::embree
   # igl::opengl
-  # igl::stb
+  igl::stb
   # igl::predicates
   # igl::xml
   # igl_copyleft::cgal
@@ -47,3 +47,16 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   # igl_restricted::mosek
   # igl_restricted::triangle
   )
+  
+ #cholmod support for solver runtime comparison, can leave away if using Eigen solver
+find_path(SUITESPARSE_INCLUDE_DIR cholmod.h PATHS /usr/include/suitesparse)
+find_library(SUITESPARSE_LIB cholmod PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+find_library(SUITESPARSECONFIG_LIB suitesparseconfig PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+
+if (SUITESPARSE_INCLUDE_DIR AND SUITESPARSE_LIB AND SUITESPARSECONFIG_LIB)
+    target_include_directories(smooth_arap PRIVATE ${SUITESPARSE_INCLUDE_DIR})
+    target_link_libraries(smooth_arap PRIVATE ${SUITESPARSE_LIB} ${SUITESPARSECONFIG_LIB})
+else()
+    message(FATAL_ERROR "SuiteSparse libraries not found")
+endif()
+

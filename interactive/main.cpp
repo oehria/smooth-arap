@@ -23,6 +23,8 @@
 #include <igl/screen_space_selection.h>
 #include <igl/AABB.h>
 #include <igl/stb/read_image.h>
+//cholmod solver
+#include <Eigen/CholmodSupport>
 
 
 //names
@@ -44,6 +46,7 @@ int method = 1;//0 is spokes only
 //1 spokes and rims
 //2 triangle spokes and rims
 string save_name;
+bool timing=true;
 
 
 
@@ -51,7 +54,7 @@ std::vector<std::set<int>> areas;//each one contains itself and all others attac
 
 igl::ARAPData arap_data;
 
-
+igl::Timer t;
 //list of all vertices with their corresponding handle id. -1 if no handle
 Eigen::VectorXi handle_id(0, 1);
 //list of all vertices belonging to handles (id not -1), #HV x1
@@ -68,10 +71,12 @@ igl::opengl::glfw::imgui::SelectionWidget selection;
 igl::opengl::glfw::imgui::ImGuiMenu menu;
 int plugin_vertex = 0;
 Eigen::VectorXi v_free_index, v_constrained_index;
-Eigen::SimplicialCholesky<SparseMatrix<double>> solver;
+//Eigen::SimplicialLDLT<SparseMatrix<double>> solver;//normal Eigen solver used for most stuff
+Eigen::CholmodSupernodalLLT<Eigen::SparseMatrix<double>> solver;//cholmod solver
 Eigen::SparseMatrix<double> free_influenced;
 double lambda = 0.9;
 std::vector<std::vector<int>> adj_list;
+Eigen::MatrixXd V_free_deformed;
 VectorXd sel_vertices;
 
 Eigen::VectorXi cvi;//save how many triangles vertices are part of
@@ -84,7 +89,8 @@ struct Edge {
 std::vector<std::vector<Edge>> edgeSets;
 std::vector<std::vector<Edge>> edgeSets_tr;
 
-Eigen::RowVector3d point_color(102 / 255.0, 12 / 255.0, 33 / 255.0);
+//Eigen::RowVector3d point_color(102 / 255.0, 12 / 255.0, 33 / 255.0);
+Eigen::RowVector3d point_color(1, 0.85, 0.40);
 Eigen::RowVector3d mesh_color(137 / 255.0, 200 / 255.0, 240 / 255.0);
 Eigen::MatrixXd VN;//vertex normals
 
@@ -420,6 +426,8 @@ void factorize(Viewer& viewer, double lambda) {
 
     //construct system matrix 
     bi_lap = lambda * L * M_inv * L - (1.0 - lambda) * L;
+
+    t.start();
     //constrain system
     int num_free = V_orig.rows() - handle_vertices.size();
     v_free_index.resize(num_free);
@@ -436,7 +444,14 @@ void factorize(Viewer& viewer, double lambda) {
     std::cout<<std::endl;
     igl::slice(bi_lap, v_free_index, v_free_index, solver_mat);
     igl::slice(bi_lap, v_free_index, v_constrained_index, free_influenced);
+    t.stop();
+    if(timing) std::cout << "slice for constraining factorization: " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
+    t.start();
     solver.compute(solver_mat);
+    t.stop();
+    std::cout<<solver_mat.rows()<<" "<<solver_mat.cols()<<" "<<solver_mat.norm()<<std::endl;
+    if(timing) std::cout << "factorization (solver.compute): " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
+        
     //libigl arap for debugging
 #if 0
     arap_data.max_iter = 1;
@@ -550,9 +565,13 @@ bool solve(Viewer& viewer) {
         findRotations_triangles(V_orig, V, F, Cov, edgeSets_tr, L, L * V_orig, lambda, R);
         rhs_triangles(Cov, V_orig, F, L * V_orig, edgeSets_tr, L, R, lambda, b);
     }
+    
     Eigen::MatrixXd bI;
     igl::slice(b, v_free_index, R3, bI);//only non-handle part of arap rhs
-    Eigen::MatrixXd V_free_deformed = solver.solve(bI - b2);//solve constrained
+    t.start();
+    V_free_deformed = solver.solve(bI - b2);//solve constrained
+    t.stop();
+    if(timing) std::cout << "solve without constraint: " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
 
     V_def = V_orig;
     igl::slice_into(V_free_deformed, v_free_index, R3, V_def);
@@ -686,6 +705,8 @@ int main(int argc, char* argv[]) {
                 }
             }
             solve(viewer);
+            //solve(viewer);
+            //solve(viewer);
         }
         T0 = T;
         pluginpos = ((pluginpos.rowwise().homogeneous() * TT).rowwise().hnormalized()).eval();
@@ -799,7 +820,7 @@ int main(int argc, char* argv[]) {
         case 'P': case 'p': vertex_picking_mode = true; handle_option = VERTEX;  selection.mode = igl::opengl::glfw::imgui::SelectionWidget::OFF; return true;//try to add vertex picking mode 
         case 'X': case 'x': handle_deleting_mode = true; handle_option = REMOVE; return true;
         case 'C': case 'c':
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < 1; i++) {//TODO change to 10again
                 solve(viewer);
             }
             return true;
@@ -924,13 +945,20 @@ v     Switch off handle selection
 )";
 
     //set up viewer
-    if(filename.compare("spot.obj")){
+    if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){//textured meshes
         mesh_color.setOnes();
+        point_color.setZero();
+        std::cout<<"huhh hi spot!"<<endl;
     }
     viewer.data().set_colors(mesh_color);//paint color
-    if(filename.compare("spot.obj")){
+    if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){
         Eigen::Matrix<unsigned char,Eigen::Dynamic,Eigen::Dynamic> R,G,B,A;
-        igl::stb::read_image("../data/spot_texture.png",R,G,B,A);
+        if(filename.compare("../data/spot.obj")==0){
+            igl::stb::read_image("../data/spot_texture.png",R,G,B,A);
+        }
+        else{
+            igl::stb::read_image("../data/blub_texture.png",R,G,B,A);
+        }
         MatrixXd VT, CN, FN;
         MatrixXi FT;
         igl::readOBJ(filename, V, VT, CN, F, FT, FN);
@@ -940,7 +968,7 @@ v     Switch off handle selection
     }
     viewer.data().compute_normals();
     viewer.data().show_lines = false;
-    viewer.data().point_size = 10;
+    viewer.data().point_size = 15;
     viewer.core().background_color.setOnes();
     viewer.launch();
 }
