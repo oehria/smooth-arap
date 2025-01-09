@@ -404,36 +404,6 @@ int main(int argc, const char* argv[]) {
     menu.callback_draw_viewer_menu = [&]()
 	{
         if (ImGui::InputFloat("Smoothness Lambda [0,1]", &lambda, 0, 0));
-        ImGui::InputText("File name", save_name);
-        if (ImGui::Button("save .obj and stats", ImVec2(-1, 0)))
-        {
-            //save mesh
-            std::fstream s{ "../res/" + save_name + ".obj", s.binary | s.trunc | s.in | s.out };
-            for (int i = 0; i < V.rows(); i++) {
-                s << "v " << V1(i, 0) << " " << V1(i, 1) << " " << V1(i, 2) << std::endl;
-            }
-            for (int i = 0; i < F.rows(); i++) {
-                s << "f " << F(i, 0) + 1 << "/" << F(i, 0) + 1 << " "
-                    << F(i, 1) + 1 << "/" << F(i, 1) + 1 << " "
-                    << F(i, 2) + 1 << "/" << F(i, 2) + 1 << " " << std::endl;
-            }
-            s.close();
-            //save metrics in .txt
-            std::ofstream outFile("../res/" + save_name + ".txt");
-            // Check if the file opened successfully
-            if (!outFile) {
-                std::cerr << "Failed to open the file for writing!" << std::endl;
-            }
-            // Write some text to the file
-            outFile << "metrics for " << save_name << std::endl;
-            outFile << metric_iters<<" iterations until convergence ("<<convergence_thresh<<")"<<endl;
-            outFile<<"took "<<metric_time-metric_fac_time<<" s, excluding "<<metric_fac_time<<" s for factorization"<<endl;
-            
-            // Close the file
-            outFile.close();
-            std::cout << "Mesh and metrics have been saved!" << std::endl;
-
-        }
         int init_type = static_cast<int>(init);
         if (ImGui::Combo("Initialization Scheme", &init_type, "Handle\0Poisson\0Bi-Laplacian\0"))
         {
@@ -494,6 +464,36 @@ int main(int argc, const char* argv[]) {
             metric_time=time.getElapsedTime();
             metric_iters=i;
             viewer.data().set_mesh(V1, F);
+        }
+        ImGui::InputText("File name", save_name);
+        if (ImGui::Button("save .obj and stats", ImVec2(-1, 0)))
+        {
+            //save mesh
+            std::fstream s{ "../res/" + save_name + ".obj", s.binary | s.trunc | s.in | s.out };
+            for (int i = 0; i < V.rows(); i++) {
+                s << "v " << V1(i, 0) << " " << V1(i, 1) << " " << V1(i, 2) << std::endl;
+            }
+            for (int i = 0; i < F.rows(); i++) {
+                s << "f " << F(i, 0) + 1 << "/" << F(i, 0) + 1 << " "
+                    << F(i, 1) + 1 << "/" << F(i, 1) + 1 << " "
+                    << F(i, 2) + 1 << "/" << F(i, 2) + 1 << " " << std::endl;
+            }
+            s.close();
+            //save metrics in .txt
+            std::ofstream outFile("../res/" + save_name + ".txt");
+            // Check if the file opened successfully
+            if (!outFile) {
+                std::cerr << "Failed to open the file for writing!" << std::endl;
+            }
+            // Write some text to the file
+            outFile << "metrics for " << save_name << std::endl;
+            outFile << metric_iters<<" iterations until convergence ("<<convergence_thresh<<")"<<endl;
+            outFile<<"took "<<metric_time-metric_fac_time<<" s, excluding "<<metric_fac_time<<" s for factorization"<<endl;
+            
+            // Close the file
+            outFile.close();
+            std::cout << "Mesh and metrics have been saved!" << std::endl;
+
         }
     };
 
