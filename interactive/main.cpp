@@ -1,4 +1,5 @@
-//this is the new version
+//used when replacing Eigen solver through cholmod
+#define USE_CHOLMOD
 
 #include <igl/read_triangle_mesh.h>
 #include <igl/opengl/glfw/Viewer.h>
@@ -24,7 +25,9 @@
 #include <igl/AABB.h>
 #include <igl/stb/read_image.h>
 //cholmod solver
+#ifdef USE_CHOLMOD
 #include <Eigen/CholmodSupport>
+#endif
 
 
 //names
@@ -34,8 +37,18 @@ using Viewer = igl::opengl::glfw::Viewer;
 
 Eigen::MatrixXd V_orig, V_def, V;//vertex matrices
 Eigen::MatrixXi F;//face matrix
-Eigen::SparseMatrix<double> L, L_sr, M, M_inv;//laplacian matrix, mass matrix
-Eigen::MatrixXd Cov;//for rotation fitting
+Eigen::SparseMatrix<double> L, M, M_inv;//laplacian matrix, mass matrix
+Eigen::MatrixXd Cov;//covariance matrix for rotation fitting
+Eigen::VectorXi v_free_index, v_constrained_index;
+//Eigen::SimplicialLDLT<SparseMatrix<double>> solver;//normal Eigen solver used for most stuff
+Eigen::CholmodSupernodalLLT<Eigen::SparseMatrix<double>> solver;//cholmod solver
+Eigen::SparseMatrix<double> free_influenced;
+double lambda = 0.9;
+std::vector<std::vector<int>> adj_list;
+Eigen::MatrixXd V_free_deformed;
+VectorXd sel_vertices;
+
+//viewer and interaction stuff
 igl::opengl::glfw::Viewer viewer;
 bool vertex_picking_mode = false;
 bool handle_deleting_mode = false;
@@ -46,21 +59,12 @@ int method = 1;//0 is spokes only
 //1 spokes and rims
 //2 triangle spokes and rims
 string save_name;
-bool timing=true;
-
-
-
-std::vector<std::set<int>> areas;//each one contains itself and all others attached
-
-igl::ARAPData arap_data;
-
+bool timing=false;//ouput factorization and solve times
 igl::Timer t;
 //list of all vertices with their corresponding handle id. -1 if no handle
 Eigen::VectorXi handle_id(0, 1);
 //list of all vertices belonging to handles (id not -1), #HV x1
 Eigen::VectorXi handle_vertices(0, 1);
-//centroids of handle regions, #H x1
-//Eigen::MatrixXd handle_centroids(0, 3);
 //updated positions of handle vertices, #HV x3
 Eigen::MatrixXd handle_vertex_positions(0, 3);
 int num_handles = 0;
@@ -70,16 +74,9 @@ Eigen::Matrix4f T0 = guizmo.T;
 igl::opengl::glfw::imgui::SelectionWidget selection;
 igl::opengl::glfw::imgui::ImGuiMenu menu;
 int plugin_vertex = 0;
-Eigen::VectorXi v_free_index, v_constrained_index;
-//Eigen::SimplicialLDLT<SparseMatrix<double>> solver;//normal Eigen solver used for most stuff
-Eigen::CholmodSupernodalLLT<Eigen::SparseMatrix<double>> solver;//cholmod solver
-Eigen::SparseMatrix<double> free_influenced;
-double lambda = 0.9;
-std::vector<std::vector<int>> adj_list;
-Eigen::MatrixXd V_free_deformed;
-VectorXd sel_vertices;
-
 Eigen::VectorXi cvi;//save how many triangles vertices are part of
+
+
 struct Edge {
     const int i;
     const int j;
@@ -99,10 +96,10 @@ enum Handle { LASSO, MARQUE, VERTEX, REMOVE, NONE};
 Handle handle_option = NONE;
 enum Trans { ROTATE, TRANSLATE, SCALE};
 Trans transform_mode = TRANSLATE;
-enum Method { SPOKES_ONLY,SPOKES_RIMS, TRIANGLE};
+enum Method { SPOKES_ONLY,SPOKES_RIMS, TRIANGLE};//for research purposes, stick to SPOKES_RIMS, the others do not work as well and their code has not been tested and updated
 Method method_mode = SPOKES_RIMS;
 
-//TRIANGLE SPOKES AND RIMS
+//TRIANGLE SPOKES AND RIMS - not relevant for normal smooth arap
 void findRotations_triangles(const Eigen::MatrixXd& V0, const Eigen::MatrixXd& V1, const Eigen::MatrixXi& F, const Eigen::MatrixXd& C, const std::vector<std::vector<Edge>>& edgeSets, const Eigen::SparseMatrix<double>& L, const Eigen::MatrixXd& LV0, const double lambda, std::vector<Eigen::Matrix3d>& rot) {
 
     const auto n = V0.rows();//vertices
@@ -238,6 +235,9 @@ Eigen::MatrixXd rhs_triangles(const Eigen::MatrixXd& C,
     return rhs;
 }
 
+
+//SPOKES AND RIMS ARAP
+//initialize neighborhood data structure 
 void spokesAndRimsEdges_sr(Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::SparseMatrix<double>& L, std::vector<std::vector<Edge>>& edgeSets_sr) {
     const int nv = (int)L.rows();
     const int nf = (int)F.rows();
@@ -247,19 +247,8 @@ void spokesAndRimsEdges_sr(Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::Sparse
     igl::cotmatrix_entries(V, F, C);
     cvi = Eigen::VectorXi::Zero(nv);
 
-    /*
-    struct Edge_sr {
-        const int vertex_pos;//first vertex, positive sign
-        const int vertex_neg;//second vertex, negative sign
-        const int rid;//the rotation taken (some vertex number around)
-        const double w;//the cotan (face) weight of this edge with this rid
-    };
-    */
 
     for (int i = 0; i < nf; i++) {//go over triangles
-        //cvi(F(i, 0)) += 1;//count how many triangles this vertex is part of
-        //cvi(F(i, 1)) += 1;
-        //cvi(F(i, 2)) += 1;
         for (int e = 0; e < 3; e++) {//for each vertex being in triangle
             //j is opposite vertex (gives angle, identifies edge weight C(i,j))
             int j1 = (e + 1) % 3;//edge vertices
@@ -279,6 +268,7 @@ void spokesAndRimsEdges_sr(Eigen::MatrixXd& V, Eigen::MatrixXi& F, Eigen::Sparse
     }
 }
 
+//build right hand side for global solve
 Eigen::MatrixXd rhs_sr(const Eigen::MatrixXd& C,
     const Eigen::MatrixXd& V,
     const Eigen::MatrixXi& F,
@@ -302,8 +292,7 @@ Eigen::MatrixXd rhs_sr(const Eigen::MatrixXd& C,
         rhs.row(row) = (1.0 - lambda) * b;
         row++;
     }
-    //MatrixXd LV0_sr=L_sr*V_orig;
-    if (lambda) {//lambda
+    if (lambda) {
         Eigen::MatrixXd b2;
         b2.resizeLike(LV0);
         b2.setZero();
@@ -315,30 +304,9 @@ Eigen::MatrixXd rhs_sr(const Eigen::MatrixXd& C,
         rhs += 0.5 * lambda * L * M_inv * b2;
     }
     return rhs;
-    //if (1.0 - lambda) {
-    //    Eigen::Vector3d b;
-    //    int row = 0;
-    //    for (auto& edgeSet : eSets) {//go over vertices
-    //        b.setZero();
-    //        for (auto& e : edgeSet) {//go over triangles/edges around vertex
-    //            const Eigen::Vector3d e0 = V0.row(e.vertex_pos) - V0.row(e.vertex_neg);
-    //            b += e.w / 3.0 * R[e.rid] * e0;//compute weighted, rotated edge
-    //        }
-    //        rhs.row(row) = (1.0 - lambda) * b;
-    //        row++;
-    //    }
-    //}
-    //if (lambda) {//quadratic/smooth term
-    //    Eigen::MatrixXd b2;
-    //    b2.resizeLike(LV0);
-    //    b2.setZero();
-    //    for (int i = 0; i < b2.rows(); ++i) {
-    //        b2.row(i) = R[i] * LV0.row(i).transpose();//smooth arap has rotated lap vector
-    //    }
-    //    rhs += lambda * L * b2;
-    //}
 }
 
+//find rotations over spokes and rims neighborhood
 void findRotations_sr(const Eigen::MatrixXd& V0,
     const Eigen::MatrixXd& V1,
     const Eigen::MatrixXi& F,
@@ -353,12 +321,14 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
     rot.clear();
     rot.resize(n, Eigen::Matrix3d::Zero());
 
+    lap_rot=false;//full rotation fitting should not be chosen
+
     for (auto& edgeSet : edgeSets_sr) {
         for (auto& e : edgeSet) {
             const Eigen::Vector3d e0 = V0.row(e.i) - V0.row(e.j);
             const Eigen::Vector3d e1 = V1.row(e.i) - V1.row(e.j);
             if (lap_rot) {
-                rot[e.rid] += e.w * (1 - lambda) * e0 * e1.transpose();
+                rot[e.rid] += e.w/3 * (1 - lambda) * e0 * e1.transpose();
             }
             else {
                 rot[e.rid] += e.w * e0 * e1.transpose();//lamda irrelevant, allows to do regularization experiment
@@ -370,7 +340,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
         const Eigen::MatrixXd LV1 = L * V1;
 
         for (int i = 0; i < n; ++i) {
-            rot[i] += 2*lambda * LV0.row(i).transpose() * LV1.row(i);//note removed minv here, think
+            rot[i] += 2*lambda * LV0.row(i).transpose() * M_inv*LV1.row(i);
         }
     }
 
@@ -390,6 +360,7 @@ void findRotations_sr(const Eigen::MatrixXd& V0,
     }
 }
 
+//factorize global system, called whenever constraints (not their position) change
 void factorize(Viewer& viewer, double lambda) {
     if (num_handles == 0) {
         return;
@@ -407,23 +378,6 @@ void factorize(Viewer& viewer, double lambda) {
         M_inv.setIdentity();//NO MASS USED
     }
 
-    //ANNIKA -- try spokes and rims smooth term 
-    std::vector<Eigen::Triplet<double>> triplets_sr;
-	// Fill triplets
-    int v = 0;
-    for (auto& edgeSet : edgeSets) {//go over vertices
-        for (auto& e : edgeSet) {//go over triangles/edges around vertex
-            triplets_sr.push_back(Eigen::Triplet<double>(v, e.i, e.w));
-            triplets_sr.push_back(Eigen::Triplet<double>(v, e.j, -e.w));
-            //duplicates are not an issue, will be added up by setFromTriplets
-        }
-        v++;
-    }
-	// Construct laplacian matrix from triplets
-	L_sr.resize(V.rows(), V.rows());
-	L_sr.setFromTriplets(triplets_sr.begin(), triplets_sr.end());
-
-
     //construct system matrix 
     bi_lap = lambda * L * M_inv * L - (1.0 - lambda) * L;
 
@@ -438,29 +392,15 @@ void factorize(Viewer& viewer, double lambda) {
             v_free_index[count_free++] = i;
         }
     }
-    for(int i=0; i<handle_vertices.size(); i++){
-        std::cout<<handle_vertices[i]<<", ";
-    }
-    std::cout<<std::endl;
     igl::slice(bi_lap, v_free_index, v_free_index, solver_mat);
     igl::slice(bi_lap, v_free_index, v_constrained_index, free_influenced);
-    t.stop();
-    if(timing) std::cout << "slice for constraining factorization: " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
-    t.start();
     solver.compute(solver_mat);
     t.stop();
-    std::cout<<solver_mat.rows()<<" "<<solver_mat.cols()<<" "<<solver_mat.norm()<<std::endl;
-    if(timing) std::cout << "factorization (solver.compute): " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
-        
-    //libigl arap for debugging
-#if 0
-    arap_data.max_iter = 1;
-    //chao:elements
-    arap_data.energy = igl::ARAP_ENERGY_TYPE_SPOKES;
-    igl::arap_precomputation(V_orig, F, V.cols(), handle_vertices, arap_data);//nonsmooth precomp
-#endif
+    if(timing) std::cout << "factorization (including constraints): " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
 }
 
+
+//SPOKES ONLY ARAP - not relevant for normal smooth arap
 void findRotations_spokes(const Eigen::MatrixXd& V0,
     const Eigen::MatrixXd& V1,
     const Eigen::MatrixXi& F,
@@ -539,14 +479,14 @@ Eigen::MatrixXd rhs_spokes(Viewer& viewer, double lambda, const std::vector<Eige
     return rhs;
 }
 
+
+//solve constrained global system
 bool solve(Viewer& viewer) {
     if (num_handles == 0) {
         return false;
     }
     Eigen::VectorXi R3(3);
     R3 << 0, 1, 2;
-    //igl::slice_into(handle_vertex_positions, handle_vertices, R3, V);
-    //viewer.data().set_vertices(V);
 
     Eigen::MatrixXd b2 = free_influenced * handle_vertex_positions;//constraints
     //rotation fitting
@@ -556,14 +496,16 @@ bool solve(Viewer& viewer) {
         findRotations_spokes(V_orig, V, F, Cov, R);
         //system rhs (depending on rotation)
         b = rhs_spokes(viewer, lambda, R);//arap rhs
+        std::cout<<"WARNING: spokes and rims arap should be selected"<<std::endl;
     }
     if (method == 1) {//spokes and rims arap
         findRotations_sr(V_orig, V, F, Cov, edgeSets, L, L * V_orig, lambda, R);
         b = rhs_sr(Cov, V_orig, F, L * V_orig, edgeSets, L, R, lambda);
     }
-    if (method == 2) {//spokes and rims arap
+    if (method == 2) {//triangle arap
         findRotations_triangles(V_orig, V, F, Cov, edgeSets_tr, L, L * V_orig, lambda, R);
         rhs_triangles(Cov, V_orig, F, L * V_orig, edgeSets_tr, L, R, lambda, b);
+        std::cout<<"WARNING: spokes and rims arap should be selected"<<std::endl;
     }
     
     Eigen::MatrixXd bI;
@@ -571,7 +513,7 @@ bool solve(Viewer& viewer) {
     t.start();
     V_free_deformed = solver.solve(bI - b2);//solve constrained
     t.stop();
-    if(timing) std::cout << "solve without constraint: " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
+    if(timing) std::cout << "solve: " << t.getElapsedTimeInMilliSec() << " ms." << std::endl;
 
     V_def = V_orig;
     igl::slice_into(V_free_deformed, v_free_index, R3, V_def);
@@ -705,8 +647,6 @@ int main(int argc, char* argv[]) {
                 }
             }
             solve(viewer);
-            //solve(viewer);
-            //solve(viewer);
         }
         T0 = T;
         pluginpos = ((pluginpos.rowwise().homogeneous() * TT).rowwise().hnormalized()).eval();
@@ -763,22 +703,18 @@ int main(int argc, char* argv[]) {
                     viewer.callback_key_pressed(viewer, 'x', 0);
                 }
             }
-            if (ImGui::Combo("Deformation Method", &method, "SPOKES_ONLY\0SPOKES_RIMS\0TRIANGLES\0"))
+            /*if (ImGui::Combo("Deformation Method", &method, "SPOKES_ONLY\0SPOKES_RIMS\0TRIANGLES\0"))//disabled option of switching neighborhood as spokes only and triangle code have not been updated and tested
             {
                 method_mode = static_cast<Method>(method);
                 factorize(viewer, lambda); 
                 solve(viewer);
-            }
+            }*/
             if (ImGui::InputDouble("Smoothness lambda [0,1]", &lambda, 0, 0)) {
                 factorize(viewer, lambda); 
                 solve(viewer);
             }
-            ImGui::Checkbox("Full rotation fitting", &lap_rot);
+            //ImGui::Checkbox("Full rotation fitting", &lap_rot);//disabled option of full rotation fitting since it's not beneficial and its code has not been updated and tested
             if (ImGui::Checkbox("No rotation (naive Laplacian)", &naive)) {
-                factorize(viewer, lambda);
-                solve(viewer);
-            };
-            if (ImGui::Checkbox("No Mass", &no_mass)) {
                 factorize(viewer, lambda);
                 solve(viewer);
             };
@@ -789,7 +725,7 @@ int main(int argc, char* argv[]) {
             ImGui::InputText("File name", save_name);
 			if (ImGui::Button("save .obj", ImVec2(-1, 0)))
 			{
-				//save textured mesh
+				//save mesh
 				std::fstream s{ "../res/" + save_name + ".obj", s.binary | s.trunc | s.in | s.out };
 				for (int i = 0; i < V.rows(); i++) {
 					s << "v " << V(i, 0) << " " << V(i, 1) << " " << V(i, 2) << std::endl;
@@ -807,20 +743,16 @@ int main(int argc, char* argv[]) {
     // Maya-style keyboard shortcuts for operation
     viewer.callback_key_pressed = [&](decltype(viewer)&, unsigned int key, int mod)
     {
-        cout << "keyy" << endl;
         vertex_picking_mode = false;
         handle_deleting_mode = false;
         switch (key)
         {
         case 'T': case 't': guizmo.operation = ImGuizmo::TRANSLATE;  transform_mode = TRANSLATE;  return true;
         case 'R': case 'r': guizmo.operation = ImGuizmo::ROTATE;  transform_mode = ROTATE;  return true;
-       /* case 'V': case 'v': vertex_picking_mode = false; handle_option = NONE;  return true;
-        case 'M': case 'm': cout << "mmm" << endl; handle_option = MARQUE;  return true;
-        case 'l': handle_option = LASSO;  return true;*/
         case 'P': case 'p': vertex_picking_mode = true; handle_option = VERTEX;  selection.mode = igl::opengl::glfw::imgui::SelectionWidget::OFF; return true;//try to add vertex picking mode 
         case 'X': case 'x': handle_deleting_mode = true; handle_option = REMOVE; return true;
         case 'C': case 'c':
-            for (int i = 0; i < 1; i++) {//TODO change to 10again
+            for (int i = 0; i < 10; i++) {
                 solve(viewer);
             }
             return true;
@@ -945,10 +877,9 @@ v     Switch off handle selection
 )";
 
     //set up viewer
-    if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){//textured meshes
+    if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){//textured meshes, just for nice visuals:)
         mesh_color.setOnes();
         point_color.setZero();
-        std::cout<<"huhh hi spot!"<<endl;
     }
     viewer.data().set_colors(mesh_color);//paint color
     if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){
