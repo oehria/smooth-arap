@@ -20,6 +20,8 @@ make
 ## Interactive
 There are two versions of this published, one being the normal interactive application, where users can select handles and drag them, causing the mesh to deform accordingly. Interactive_solver contains the code for the solver updates, that avoids having to refactorize when adding a new handle. As this is only more efficient for few handles (as are used in most applications), this framework is limited to single point handles. 
 
+### Normal solver
+
 **Input:** A manifold, orientable triangle mesh to deform through its filename, e.g. `my_mesh.obj`, which is assumed to be in the data folder. 
 
 **Interface:**
@@ -30,7 +32,10 @@ There are two versions of this published, one being the normal interactive appli
 * File name: in case you want to save your results in the res folder, specify the name under which you want to save them
 * Press `save .obj`: This saves your deformed result  as a .obj file
 
-Disclaimer: For developing the method, we also implemented ARAP over different neighborhoods to compare, full rotation fitting and some other features. These have not necessarily been updated and tested for the final energy formulation in the paper, so you should stick 
+### Solver with efficient updates
+
+
+
 
 ## Non-Interactive
 This code serves the purpose of recreating the deformation survey [Sorkine and Botsch 2009] examples with our method. 
