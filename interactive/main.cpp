@@ -30,6 +30,15 @@
 #endif
 
 
+/*
+DISCLAIMER: For developing the method, we also implemented ARAP over different neighborhoods to compare, 
+full rotation fitting and some other features. These can still be found in this code, but have not necessarily been cleaned up,
+updated and tested for the final reweighting of energy terms in the paper, so you should stick to the options presented in the paper 
+(the ones that are available via the interface)
+*/
+
+
+
 //names
 using namespace std;
 using namespace Eigen;
@@ -714,10 +723,10 @@ int main(int argc, char* argv[]) {
                 solve(viewer);
             }
             //ImGui::Checkbox("Full rotation fitting", &lap_rot);//disabled option of full rotation fitting since it's not beneficial and its code has not been updated and tested
-            if (ImGui::Checkbox("No rotation (naive Laplacian)", &naive)) {
+            /*if (ImGui::Checkbox("No rotation (naive Laplacian)", &naive)) {
                 factorize(viewer, lambda);
                 solve(viewer);
-            };
+            };*/
             if (ImGui::Button("10 iterations", ImVec2(-1, 0)))
             {
                 viewer.callback_key_pressed(viewer, 'c', 0);

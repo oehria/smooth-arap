@@ -18,21 +18,19 @@ make
 ```
 
 ## Interactive
-There are two versions of this published, one being the normal interactive application, where users can select handles and drag them, causing the mesh to deform accordingly. Interactive_solver contains the code for the solver updates, that avoids having to refactorize when adding a new handle. As this is only more efficient for small changes, this framework is limited to single point handles. 
-Otherwise, both work the same way.
+There are two versions of this published, one being the normal interactive application, where users can select handles and drag them, causing the mesh to deform accordingly. Interactive_solver contains the code for the solver updates, that avoids having to refactorize when adding a new handle. As this is only more efficient for few handles (as are used in most applications), this framework is limited to single point handles. 
 
-**Input:** A manifold, orientable triangle mesh to deform. 
+**Input:** A manifold, orientable triangle mesh to deform through its filename, e.g. `my_mesh.obj`, which is assumed to be in the data folder. 
 
-**How to use:**
-* Start the application with the path to the mesh as the first command line argument
-* Select handles and change their positions via translation, rotation and scaling.
-* Press `3` to initialize the parameterization via LSCM
-* Press `6`to compute the Chebyshev parameterization. This will automatically run until convergence/ the iteration limit is reached. To adapt these, adapt convergence_precision and max_iters in the code. If you want the shearing to be limited, set the shearing angle limit in the GUI beforehand.
-* Press `4`to run ARAP parameterization. Again, this automatically runs until convergence.
-* You can adapt the Texture Resolution by changing the number in the GUI
-* To run from a saved initialization, you can use the button `load texture from .obj` and then run Chebyshev parameterization as per usual.
-* To save your results with corresponding metrics like Chebyshev error, runtime etc, enter a name and click on `save .obj and stats`. It will write into the `res` folder.
+**Interface:**
+* Transformation mode: Change between translating, rotating and scaling handles. For translation you can also press the shortcut key `t` and for rotation `r` 
+* Handle option: Choose between creating a handle with the lasso tool (`l`), marque area (`m`), single vertex handle (`p`), removing a vertex (`x`) or creating no new handle (`v`) via the dropdown menu or shortcut keys
+* Enter the desired smoothness parameter lambda
+* Move the handles around as you desire and the mesh will deform accordingly. Should you want to let it converge further in between, use the `10 iterations` button or press the shortcut `c`
+* File name: in case you want to save your results in the res folder, specify the name under which you want to save them
+* Press `save .obj`: This saves your deformed result  as a .obj file
 
+Disclaimer: For developing the method, we also implemented ARAP over different neighborhoods to compare, full rotation fitting and some other features. These have not necessarily been updated and tested for the final energy formulation in the paper, so you should stick 
 
 ## Non-Interactive
 This code serves the purpose of recreating the deformation survey [Sorkine and Botsch 2009] examples with our method. 
@@ -44,5 +42,5 @@ This code serves the purpose of recreating the deformation survey [Sorkine and B
 * Initialization Scheme: Choose between Handle (initializing via the original mesh), Poisson (solving a constrained Poisson system) and Bi-Laplacian (solving a constrained Bi-Laplacian system). The result will be displayed. 
 * Max: Adjust the maximal number of iterations if needed
 * Press `arap deformation` button to run the deformation until convergence (relative change of mesh < 0.0001) or the maximum number of iterations is reached
-* File name: in case you want to save your results, specify the name under which you want to save them
+* File name: in case you want to save your results in the res folder, specify the name under which you want to save them
 * Press `save .obj and stats`: This saves your mesh as a .obj and an additional .txt file with your runtime and number of iterations until convergence. 
