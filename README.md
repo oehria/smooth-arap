@@ -29,7 +29,7 @@ There are two versions of this published, one being the normal interactive appli
 * Handle option: Choose between creating a handle with the lasso tool (`l`), marque area (`m`), single vertex handle (`p`), removing a vertex (`x`) or creating no new handle (`v`) via the dropdown menu or shortcut keys
 * Enter the desired smoothness parameter lambda
 * Move the handles around as you desire and the mesh will deform accordingly. Should you want to let it converge further in between, use the `10 iterations` button or press the shortcut `c`
-* File name: in case you want to save your results in the res folder, specify the name under which you want to save them
+* File name: in case you want to save your results in the res folder (make sure it exists and is next to the data folder), specify the name under which you want to save them
 * Press `save .obj`: This saves your deformed result  as a .obj file
 
 ### Solver with efficient updates
