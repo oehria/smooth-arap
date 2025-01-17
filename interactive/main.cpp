@@ -49,10 +49,10 @@ Eigen::MatrixXi F;//face matrix
 Eigen::SparseMatrix<double> L, M, M_inv;//laplacian matrix, mass matrix
 Eigen::MatrixXd Cov;//covariance matrix for rotation fitting
 Eigen::VectorXi v_free_index, v_constrained_index;
-//Eigen::SimplicialLDLT<SparseMatrix<double>> solver;//normal Eigen solver used for most stuff
-Eigen::CholmodSupernodalLLT<Eigen::SparseMatrix<double>> solver;//cholmod solver
+Eigen::SimplicialLDLT<SparseMatrix<double>> solver;//normal Eigen solver used for most stuff
+//Eigen::CholmodSupernodalLLT<Eigen::SparseMatrix<double>> solver;//cholmod solver
 Eigen::SparseMatrix<double> free_influenced;
-double lambda = 0.9;
+double lambda = 0.99;
 std::vector<std::vector<int>> adj_list;
 Eigen::MatrixXd V_free_deformed;
 VectorXd sel_vertices;
@@ -68,7 +68,7 @@ int method = 1;//0 is spokes only
 //1 spokes and rims
 //2 triangle spokes and rims
 string save_name;
-bool timing=false;//ouput factorization and solve times
+bool timing=true;//ouput factorization and solve times
 igl::Timer t;
 //list of all vertices with their corresponding handle id. -1 if no handle
 Eigen::VectorXi handle_id(0, 1);
@@ -389,6 +389,7 @@ void factorize(Viewer& viewer, double lambda) {
 
     //construct system matrix 
     bi_lap = lambda * L * M_inv * L - (1.0 - lambda) * L;
+    cout<<"yahaha system"<<endl;
 
     t.start();
     //constrain system
@@ -518,6 +519,7 @@ bool solve(Viewer& viewer) {
     }
     
     Eigen::MatrixXd bI;
+    cout<<"nr handle "<<handle_vertex_positions.rows()<<endl;
     igl::slice(b, v_free_index, R3, bI);//only non-handle part of arap rhs
     t.start();
     V_free_deformed = solver.solve(bI - b2);//solve constrained
@@ -620,6 +622,7 @@ int main(int argc, char* argv[]) {
     tree.init(V, F);
     Eigen::Array<double, Eigen::Dynamic, 1> and_visible =
         Eigen::Array<double, Eigen::Dynamic, 1>::Zero(V.rows());
+   
 
     //initialize handles 
     //id to -1 because nothing was assigned yet
@@ -874,6 +877,29 @@ int main(int argc, char* argv[]) {
     };
 
 
+
+//TODO remove this is for do they do same thing
+    //constrainedSolver->addConstraint(0);
+    //constrainedSolver->addConstraint(4000);
+   /* handle_vertices.resize(2);
+    handle_vertices<<0, 4000;
+    cout<<"idy"<<endl;
+    handle_vertex_positions.resize(2,3);
+    handle_vertex_positions.row(0)=V.row(0);
+    Vector3d offs;
+    offs<<0,-3000,110;
+    handle_vertex_positions.row(1)=V.row(4000)+offs.transpose();
+    num_handles=2;
+    handle_id(0)=0;
+    handle_id(4000)=4000;
+    cout<<"pre stuff"<<endl;
+    factorize(viewer, lambda);
+    cout<<"fac"<<endl;
+    solve(viewer);
+    cout<<"THIS IS THE NORM AFTER THE SOLVER NORMAL ONE "<<V.norm()<<endl;*/
+
+
+
     //display shortcut keys
     std::cout << R"(
 T,t   Switch to translate operation
@@ -884,6 +910,8 @@ M, m  Area marquee selection
 l     Area lasso selection
 v     Switch off handle selection
 )";
+
+
 
     //set up viewer
     if(filename.compare("../data/spot.obj")==0||filename.compare("../data/blub.obj")==0){//textured meshes, just for nice visuals:)
