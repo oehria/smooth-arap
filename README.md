@@ -4,7 +4,15 @@ This is the implementation of the paper "Higher Order Continuity for Smooth As-R
 
 **BibTex**
 ```
-to be released
+@misc{oehri2025higherordercontinuitysmooth,
+      title={Higher Order Continuity for Smooth As-Rigid-As-Possible Shape Modeling}, 
+      author={Annika Oehri and Philipp Herholz and Olga Sorkine-Hornung},
+      year={2025},
+      eprint={2501.10335},
+      archivePrefix={arXiv},
+      primaryClass={cs.CG},
+      url={https://arxiv.org/abs/2501.10335}, 
+}
 ```
 
 ## Installation guide
